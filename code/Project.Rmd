@@ -143,7 +143,7 @@ n = dim(diez)[1]
 
 sigma = solve(1/sig.sq*diag(n)+solve(cov.func))
 
-mu = sigma %*%(1/sig.sq*diez$centered)
+mu = sigma %*%(1/sig.sq*diez$max)
 
 lower = mu - 1.96*sqrt(diag(sigma))
 upper = mu + 1.96*sqrt(diag(sigma))
@@ -205,17 +205,18 @@ names(max.matrix) = c("nueve", "diez", "once", "doce", "trece", "catorce", "quin
 # Parameters: 
   # - Y is 365 by n_year matrix with pollution levels
   # - mu is 365 by n_year matrix with offset 
+  # - s2 is sigma^2
 # Returns: 
   # - One sample of conditional posterior draw of vector f(x)
-sample.f <- function(Y, mu) {
+sample.f <- function(Y, mu, s2) {
   # Normal conjugate 
   b = rep(0, 365)
   sigma = matrix(data=0, nrow=365, ncol=365)
   # for each year, calculate b_i and sigma_i then add them to b, sigma
   for (i in 1:dim(Y)[2]) {
-    b.i = Y[,i] - mu[, i] / sigma.sq
+    b.i = (Y[,i] - mu[, i]) / s2
     b = b + b.i
-    sigma.i = Cinv + diag(1/sigma.sq, 365)
+    sigma.i = Cinv + diag(1/s2, 365)
     sigma = sigma + sigma.i
   }
   post.var = solve(sigma)
@@ -226,14 +227,31 @@ sample.f <- function(Y, mu) {
 # Parameters: 
   # y: 1x365 vector of values for one single year
   # f: previous draw of f(x) vector
+  # s2: sigma^2
 # Returns: 
   # 1x365 vector of offsets for single year
-sample.mu.i <- function(y, f) {
-  b = (y - f) / sigma.sq
+sample.mu.i <- function(y, f, s2) {
+  b = (y - f) / s2
   sigma = Cinv + diag(1/sigma.sq.mu, 365)
   post.var = solve(sigma)
   post.mean = post.var %*% matrix(b)
   rmvnorm(1, post.mean, post.var)
+}
+
+# Parameters:
+  # Y is 365 by n_year matrix with pollution levels
+  # f - same as above
+  # mu: 365 by n_year matrix with offset 
+# Returns:
+  # inverse gamma draw of s2
+sample.s2 <- function(Y, f, mu) {
+  a = 0.5 * 2416 - 1 # 2416 is total number of observations
+  b = 0
+  for (i in 1:dim(Y)[2]) {
+    v = Y[,i] - f - mu[,i]
+    b =b + 0.5 * t(v) %*% v
+  }
+  1/rgamma(1, a, b)
 }
 ```
 
@@ -257,10 +275,16 @@ length(test2) == 365
 # Gibbs sampler
 
 # Fixed parameters
-sigma.sq = 1
-Cinv = solve(periodic_covariance(1:365))
-sigma.sq.mu = 1
-
+N = sum(
+  sum(nueve$max != 0),
+  sum(diez$max != 0),
+  sum(once$max != 0),
+  sum(doce$max != 0),
+  sum(trece$max != 0),
+  sum(catorce$max != 0),
+  sum(quince$max != 0),
+  sum(dieciseis$max != 0)
+) # 2416 total observations
 
 # Gibbs sampler parameters
 n.iter = 1000
@@ -293,18 +317,20 @@ for (iter in 2:n.iter) {
 
 
 ```{r}
-f.avg = colMeans(f) + colMeans(mu[["quince"]])
-f.df = data.frame(x=1:365, y=f.avg)
+f.avg = colMeans(f) 
+f.df = data.frame(x=1:365, y=f.avg) 
 ggplot(data=f.df, aes(x=x, y=y)) +
-  geom_line() +
-  geom_point(data=data.frame(quince), aes(x=day, y=max), alpha=0.5, size=0.5)
+  geom_line() 
+ggsave("./../Desktop/Sp22/modeling/SDS383c/project/fx_plot.jpeg")
 ```
+
+
 ```{r}
 # Make plots of f(x) for each year 
 data_list = list(nueve = nueve, diez = diez, once = once, doce = doce, trece = trece, catorce = catorce, quince = quince, dieciseis = dieciseis)
 names_list = list(nueve = 2009, diez = 2010, once = 2011, doce = 2012, trece = 2013, catorce = 2014, quince = 2015, dieciseis = 2016)
 for(year in colnames(max.matrix)){
-  n = 1000
+  n = n.iter 
   short = f[1:n,]
   f.avg = colMeans(short) + colMeans(mu[[year]][1:n,])
   f.df = data.frame(x=1:365, y=f.avg)
@@ -317,7 +343,7 @@ for(year in colnames(max.matrix)){
   }
   day = 1:365
   # Plot
-  ggplot(data=f.df, aes(x=x, y=y)) + 
+  p=ggplot(data=f.df, aes(x=x, y=y)) + 
     ggtitle(paste0("Maximum O3 Pollution at Acolman Station In Year ", names_list[[year]]) ) + 
     xlab("Year") + ylab("O3 ppb") +
     geom_line() +
@@ -353,8 +379,83 @@ for (year in colnames(max.matrix)) {
 save.image(file="currentenv.RData")
 ```
 
+```{r}
+###########################################################
+##########   Gibbs Sampler with Variance  #################
+###########################################################
+n.iter = 1000
 
+# Gibbs sampler storage parameters
+mu <- list()
+for (year in colnames(max.matrix)) {
+  mu[[year]] = matrix(data=NA, nrow=n.iter, ncol=365)
+  mu[[year]][1,] = rep(0, 365)
+}
+mu.iter = matrix(data=0, nrow=365, ncol=length(colnames(max.matrix)))
+f = matrix(data=NA, nrow=n.iter, ncol=365)
+f[1,] = rep(0, 365)
+s2 = matrix(data=NA, nrow=n.iter, ncol=1)
+s2[1,1] = s2.iter = 1
+ 
+# Start Gibbs sampler
+for (iter in 2:n.iter) {
+  # Sample f
+  f.iter = sample.f(max.matrix, mu.iter, s2.iter)
+  f[iter,] = f.iter
+  
+  # Sample mu_i
+  for (id in 1:length(colnames(max.matrix))) {
+    mu.i = sample.mu.i(max.matrix[,id], f.iter, s2.iter)
+    mu[[colnames(max.matrix)[id]]][iter,] = mu.i
+    mu.iter[,id] = mu.i
+  }
+  
+  # Sample s2
+  s2.iter = sample.s2(max.matrix, f.iter, mu.iter)
+  s2[iter,1] = s2.iter
+  
+  print(iter)
+}
 
+```
+
+```{r}
+f.avg = colMeans(f) 
+f.df = data.frame(x=1:365, y=f.avg) 
+ggplot(data=f.df, aes(x=x, y=y)) +
+  geom_line() 
+ggsave("./../Desktop/Sp22/modeling/SDS383c/project/fx_gibbs2.jpeg")
+```
+
+```{r}
+# Make plots of f(x) for each year 
+for (year in colnames(max.matrix)) {
+  f.avg = colMeans(f) + colMeans(mu[[year]][1:n,])
+  f.df = data.frame(x=1:365, y=f.avg)
+
+  # Quantiles for ribbon
+  short.quantiles = cbind(rep(0,365),rep(0,365))
+  data.q = short + mu[[year]][1:n,]
+  for (i in 1:365) {
+    short.quantiles[i,] = quantile(data.q[,i],c(0.05,0.95))
+  }
+  day = 1:365
+  # Plot
+  p=ggplot(data=f.df, aes(x=x, y=y)) + 
+    ggtitle(paste0("Gibbs 2: Maximum O3 @ ACO in ", names_list[[year]]) ) + 
+    xlab("Year") + ylab("O3 ppb") +
+    geom_line() +
+    geom_point(data=data.frame(data_list[[year]]), aes(x=day, y=max), alpha=0.5, size=0.5) + 
+    geom_ribbon(aes(ymin=short.quantiles[,1], ymax=short.quantiles[,2]), alpha=0.5) 
+  
+  ggsave(paste0("./../Desktop/Sp22/modeling/SDS383c/project/", year, "gibbs2", ".png"), 
+         plot=p, 
+         width = 40, 
+         height = 20, 
+         units = "cm"
+         )
+}
+```
 
 
 
