@@ -457,6 +457,39 @@ for (year in colnames(max.matrix)) {
 }
 ```
 
+```{r}
+
+# Now let's analyze mu for each year
+
+# Average offset for each year (nueve through dieciseis)
+nueve_offset = mean(colMeans(mu[["nueve"]])) # -1.345085
+diez_offset = mean(colMeans(mu[["diez"]])) # 0.4717969
+once_offset = mean(colMeans(mu[["once"]])) # 0.9155524
+doce_offset = mean(colMeans(mu[["doce"]])) #  0.608444
+trece_offset = mean(colMeans(mu[["trece"]])) # 1.227078
+catorce_offset = mean(colMeans(mu[["catorce"]])) #0.2612708
+quince_offset = mean(colMeans(mu[["quince"]])) # -1.188582
+dieciseis_offset = mean(colMeans(mu[["dieciseis"]])) # -0.7562392
+
+# Make a histogram of mu_i samples for each year
+for (year in colnames(max.matrix)) {
+  means = colMeans(mu[[year]])
+  p = ggplot(data=data.frame(x=means)) + geom_histogram(aes(x=x))
+  ggsave(
+    paste0("./mu_plots/gibbs2/", year, "mu.png"),
+    plot=p
+  )
+}
+
+
+# and s2
+plot(as.vector(s2), type="l")
+mean(as.vector(s2)) # 8.792873
+ggplot(data=data.frame(x=as.vector(s2)[-1])) + geom_histogram(aes(x=x, y=..density..))
+
+save.image(file="gibbs2.RData")
+```
+
 
 
 
