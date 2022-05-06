@@ -421,14 +421,32 @@ for (iter in 2:n.iter) {
 
 ```{r}
 f.avg = colMeans(f) 
+
 f.df = data.frame(x=1:365, y=f.avg) 
+
+# Quantiles for ribbon
+short.quantiles = cbind(rep(0,365),rep(0,365))
+for (i in 1:365) {
+  short.quantiles[i,] = quantile(f[,i],c(0.05,0.95))
+}
+  
 ggplot(data=f.df, aes(x=x, y=y)) +
-  geom_line() 
+  geom_line() +
+  geom_hline(yintercept=100, color="red") +
+  geom_point(data=data.frame(data_list[["nueve"]]), aes(x=day, y=max), alpha=0.5, size=0.5) +
+  geom_point(data=data.frame(data_list[["diez"]]), aes(x=day, y=max), alpha=0.5, size=0.5) +
+  geom_point(data=data.frame(data_list[["once"]]), aes(x=day, y=max), alpha=0.5, size=0.5) +
+  geom_point(data=data.frame(data_list[["doce"]]), aes(x=day, y=max), alpha=0.5, size=0.5) +
+  geom_point(data=data.frame(data_list[["trece"]]), aes(x=day, y=max), alpha=0.5, size=0.5) +
+  geom_point(data=data.frame(data_list[["catorce"]]), aes(x=day, y=max), alpha=0.5, size=0.5) +
+  geom_point(data=data.frame(data_list[["quince"]]), aes(x=day, y=max), alpha=0.5, size=0.5) +
+  geom_point(data=data.frame(data_list[["dieciseis"]]), aes(x=day, y=max), alpha=0.5, size=0.5) +
+  geom_ribbon(aes(ymin=short.quantiles[,1], ymax=short.quantiles[,2]), alpha=0.5) 
 ggsave("./../Desktop/Sp22/modeling/SDS383c/project/fx_gibbs2_1000.jpeg")
 ```
 
 ```{r}
-# Make plots of f(x) for each year 
+# Make plots of f(x) + offset for each year 
 for (year in colnames(max.matrix)) {
   f.avg = colMeans(f) + colMeans(mu[[year]])
   f.df = data.frame(x=1:365, y=f.avg)
@@ -445,7 +463,7 @@ for (year in colnames(max.matrix)) {
     ggtitle(paste0("Gibbs 2: Maximum O3 @ ACO in ", names_list[[year]]) ) + 
     xlab("Year") + ylab("O3 ppb") +
     geom_line() +
-    #geom_point(data=data.frame(data_list[[year]]), aes(x=day, y=max), alpha=0.5, size=0.5) + 
+    geom_point(data=data.frame(data_list[[year]]), aes(x=day, y=max), alpha=0.5, size=0.5) + 
     geom_ribbon(aes(ymin=short.quantiles[,1], ymax=short.quantiles[,2]), alpha=0.5) 
   
   ggsave(paste0("./../Desktop/Sp22/modeling/SDS383c/project/", year, "gibbs2", ".png"), 
@@ -467,7 +485,7 @@ diez_offset = mean(colMeans(mu[["diez"]])) # 0.4717969
 once_offset = mean(colMeans(mu[["once"]])) # 0.9155524
 doce_offset = mean(colMeans(mu[["doce"]])) #  0.608444
 trece_offset = mean(colMeans(mu[["trece"]])) # 1.227078
-catorce_offset = mean(colMeans(mu[["catorce"]])) #0.2612708
+catorce_offset = mean(colMeans(mu[["catorce"]])) # 0.2612708
 quince_offset = mean(colMeans(mu[["quince"]])) # -1.188582
 dieciseis_offset = mean(colMeans(mu[["dieciseis"]])) # -0.7562392
 
