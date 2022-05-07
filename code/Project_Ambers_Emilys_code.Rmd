@@ -1,0 +1,1121 @@
+---
+title: "SM Project"
+author: "Amber Day"
+date: "4/25/2022"
+output: html_document
+---
+
+```{r}
+rm(list=ls())
+```
+
+
+```{r}
+require(aire.zmvm)
+require(tidyverse)
+require(dplyr)
+require(ggplot2)
+require(ggseas)
+require(ggthemes)
+require(reshape2)
+require(matrixcalc)
+require(mvtnorm)
+require(MASS)
+require(imputeTS)
+ require(ggpubr)
+```
+
+
+```{r}
+data = get_station_data(criterion = "MAXIMOS", pollutant = "O3", year = 2005:2017)
+
+o3 = get_station_data(criterion = "MAXIMOS", 
+pollutant = "O3",
+year = 2009:2017)
+```
+
+
+```{r}
+# Organizing data
+
+o3_max = o3 %>% group_by(date) %>% summarise(max = ifelse(all(is.na(value)), NA, base::max(value, na.rm = TRUE))) %>% na.omit()
+
+o3_max$anyo = sapply(o3_max$date, function(x) substring(x,1,4))
+nueve = o3_max[which(o3_max$anyo == '2009'),]
+diez = o3_max[which(o3_max$anyo == '2010'),]
+once = o3_max[which(o3_max$anyo == '2011'),]
+doce = o3_max[which(o3_max$anyo == '2012'),]
+trece = o3_max[which(o3_max$anyo == '2013'),]
+catorce = o3_max[which(o3_max$anyo == '2014'),]
+quince = o3_max[which(o3_max$anyo == '2015'),]
+dieciseis = o3_max[which(o3_max$anyo == '2016'),]
+```
+
+
+```{r}
+# Plot 
+
+ggplot(data = nueve) + geom_point(aes(x=1:365,y=max), data=nueve,size=0.03) +
+  geom_smooth(aes(x=1:365,y=max), data=diez,size=0.03, alpha=0.1) + geom_smooth(aes(x=1:365,y=max, alpha=0.1), data=once,size=0.03) +
+  geom_smooth(aes(x=1:366,y=max, alpha=0.1), data=doce,size=0.03) + geom_smooth(aes(x=1:365,y=max, alpha=0.1), data=trece,size=0.03) +
+  geom_smooth(aes(x=1:365,y=max, alpha=0.1), data = catorce,size=0.03) + geom_smooth(aes(x=1:365,y=max, alpha=0.1), data = quince,size=0.03) +
+  geom_smooth(aes(x=1:366,y=max, alpha=0.1), data = dieciseis,size=0.03) + theme_bw() + guides(alpha=F)
+ # geom_smooth(aes(x=1:366,y=max), data = dieciseis) 
+
+```
+
+```{r}
+##Prophet facebook model for fitting time series
+
+require(prophet)
+ds <- c(nueve$date, diez$date, once$date, doce$date, trece$date)
+y <- c(nueve$max, diez$max, once$max, doce$max,trece$max)
+df <- data.frame(ds,y)
+m <- prophet(df)
+future <- make_future_dataframe(m,100,freq='day')
+pred <- predict(m, future)
+plot(m,pred) 
+
+
+ggplot(data = nueve, aes(x=1:365,y=max)) + geom_point(size=0.3) + 
+  geom_smooth(method='gam', formula= y~s(x, bs='ps'))
+```
+
+
+
+
+-----------------------Emily-------------------------------
+```{r}
+library(aire.zmvm)
+library(tidyverse)
+
+data <- get_station_data(criterion = "MAXIMOS", 
+                       pollutant = "O3",
+                       year = 2005:2019)
+
+
+# First let's focus on one station and fit a Gaussian process here
+station = "ACO"
+
+aco <- filter(data, station_code==station)
+
+o3_max <- aco %>%
+  group_by(date) %>%
+  summarise(max = ifelse(all(is.na(value)),
+                         NA,
+                         base::max(value, na.rm = TRUE)))
+o3_max$anyo <- sapply(o3_max$date, function(x) substring(x,1,4))
+nueve <- o3_max[which(o3_max$anyo == '2009'),]
+diez <- o3_max[which(o3_max$anyo == '2010'),]
+once <- o3_max[which(o3_max$anyo == '2011'),]
+doce <- o3_max[which(o3_max$anyo == '2012'),]
+# remove feb 29
+doce = doce[-60,]
+trece <- o3_max[which(o3_max$anyo == '2013'),]
+catorce <- o3_max[which(o3_max$anyo == '2014'),]
+quince <- o3_max[which(o3_max$anyo == '2015'),]
+dieciseis <- o3_max[which(o3_max$anyo == '2016'),]
+dieciseis = dieciseis[-60,]
+```
+
+
+```{r}
+ggplot() + 
+  geom_point(aes(x=1:365,y=max), data=diez,size=0.03)
+
+# Now find posterior estimate of f(x)
+#diez$day = 1:365
+
+#diez = drop_na(diez)
+
+# add column for day of year
+nueve$day = 1:365
+diez$day = 1:365
+once$day = 1:365
+doce$day = 1:365
+trece$day = 1:365
+catorce$day = 1:365
+quince$day = 1:365
+dieciseis$day = 1:365
+
+# replace NA with zeros
+nueve = nueve %>% replace(is.na(.), 0)
+diez = diez %>% replace(is.na(.), 0)
+once = once %>% replace(is.na(.), 0)
+doce = doce %>% replace(is.na(.), 0)
+trece = trece %>% replace(is.na(.), 0)
+catorce = catorce %>% replace(is.na(.), 0)
+quince = quince %>% replace(is.na(.), 0)
+dieciseis = dieciseis %>% replace(is.na(.), 0)
+
+
+
+# update later to better covariance function
+matern_covariance <- function(x, b=1, tau1.sq=1, tau2.sq=1) {
+  eucDist = as.matrix(dist(x, diag=T, upper=T))
+  kron.delta = diag(nrow=length(x))
+  tau1.sq*exp(-0.5*(eucDist/b)^2) + tau2.sq*kron.delta
+}
+```
+
+
+```{r}
+cov.func = matern_covariance(diez$day)
+
+sig.sq = 2
+
+n = dim(diez)[1]
+
+sigma = solve(1/sig.sq*diag(n)+solve(cov.func))
+
+mu = sigma %*%(1/sig.sq*diez$max)
+
+lower = mu - 1.96*sqrt(diag(sigma))
+upper = mu + 1.96*sqrt(diag(sigma))
+
+post.df = data.frame(x=diez$day, y=diez, mean=mu, lower=lower, upper=upper)
+
+ggplot(data=post.df, aes(x=x, y=y)) + 
+  geom_point() + 
+  geom_ribbon(aes(ymin=lower, ymax=upper), alpha=0.5) +
+  geom_line(mapping = aes(y=mu))
+```
+
+```{r}
+# incorporate new kernel
+
+# helper
+local_periodic <- function(xi, xj, sigma2=1, p=1, l2=4, c=1.5, a=1){
+    sigma2 * exp(-2*sin(pi*abs(xi-xj)/p)^2/l2 ) * exp(-(xi-xj)^2/(2*l2)) * a*(xi-c)*(xj-c)
+}
+
+# get the whole matrix
+periodic_covariance <- function(x, p=1, l2=4, c=1.5, sigma2=1, a=1) {
+  temp = as.matrix(outer(x, x, function(xi, xj) local_periodic(xi, xj, sigma2, p, l2, c, a)))
+  temp
+}
+
+test = periodic_covariance(diez$day)
+```
+
+```{r}
+
+
+# creating a matrix with the max for each of the years we are interested in
+max.matrix = cbind(nueve[,2], diez[,2], once[,2], doce[,2], trece[,2], catorce[,2], quince[,2], dieciseis[,2])
+
+max.matrix = as.data.frame(max.matrix)
+names(max.matrix) = c("nueve", "diez", "once", "doce", "trece", "catorce", "quince", "dieciseis")
+```
+
+```{r}
+# Parameters: 
+  # - Y is 365 by n_year matrix with pollution levels
+  # - mu is 365 by n_year matrix with offset 
+# Returns: 
+  # - One sample of conditional posterior draw of vector f(x)
+sample.f <- function(Y, mu) {
+  # Normal conjugate 
+  b = rep(0, 365)
+  sigma = matrix(data=0, nrow=365, ncol=365)
+  # for each year, calculate b_i and sigma_i then add them to b, sigma
+  for (i in 1:dim(Y)[2]) {
+    b.i = Y[,i] - mu[, i] / sigma.sq
+    b = b + b.i
+    sigma.i = Cinv + diag(1/sigma.sq, 365)
+    sigma = sigma + sigma.i
+  }
+  post.var = solve(sigma)
+  post.mean = post.var %*% b
+  rmvnorm(1, post.mean, post.var)
+}
+
+# Parameters: 
+  # y: 1x365 vector of values for one single year
+  # f: previous draw of f(x) vector
+# Returns: 
+  # 1x365 vector of offsets for single year
+sample.mu.i <- function(y, f) {
+  b = (y - f) / sigma.sq
+  sigma = Cinv + diag(1/sigma.sq.mu, 365)
+  post.var = solve(sigma)
+  post.mean = post.var %*% matrix(b)
+  rmvnorm(1, post.mean, post.var)
+}
+```
+
+```{r}
+# Some unit testing 
+
+sigma.sq = 1
+Cinv = diag(1, 365)
+sigma.sq.mu = 1
+# Test to see if functions have basic functionality
+test.out = sample.f(max.matrix, matrix(data=0, nrow=365, ncol=8))
+length(test.out) == 365
+
+test2 = sample.mu.i(max.matrix[,1], test.out)
+length(test2) == 365
+
+# both return correct length vectors
+```
+
+```{r}
+# Gibbs sampler
+
+# Fixed parameters
+sigma.sq = 1
+Cinv = solve(periodic_covariance(1:365))
+sigma.sq.mu = 1
+
+
+# Gibbs sampler parameters
+n.iter = 1000
+
+# Gibbs sampler storage parameters
+mu <- list()
+for (year in colnames(max.matrix)) {
+  mu[[year]] = matrix(data=NA, nrow=n.iter, ncol=365)
+  mu[[year]][1,] = rep(0, 365)
+}
+mu.iter = matrix(data=0, nrow=365, ncol=length(colnames(max.matrix)))
+f = matrix(data=NA, nrow=n.iter, ncol=365)
+f[1,] = rep(0, 365)
+ 
+# Start Gibbs sampler
+for (iter in 2:n.iter) {
+  # Sample f
+  f.iter = sample.f(max.matrix, mu.iter)
+  f[iter,] = f.iter
+  
+  # Sample mu_i
+  for (id in 1:length(colnames(max.matrix))) {
+    mu.i = sample.mu.i(max.matrix[,id], f.iter)
+    mu[[colnames(max.matrix)[id]]][iter,] = mu.i
+    mu.iter[,id] = mu.i
+  }
+  #print(iter)
+}
+```
+
+```{r}
+f.avg = colMeans(f)
+f.df = data.frame(x=1:365, y=f.avg)
+ggplot(data=f.df, aes(x=x, y=y)) +
+  geom_line() +
+  geom_point(data=data.frame(quince), aes(x=day, y=max), alpha=0.5, size=0.5)
+```
+
+```{r}
+# Make plots of f(x) for each year 
+data_list = list(nueve = nueve, diez = diez, once = once, doce = doce, trece = trece, catorce = catorce, quince = quince, dieciseis = dieciseis)
+names_list = list(nueve = 2009, diez = 2010, once = 2011, doce = 2012, trece = 2013, catorce = 2014, quince = 2015, dieciseis = 2016)
+for(year in colnames(max.matrix)){
+  n = 1000
+  short = f[1:n,]
+  f.avg = colMeans(short) + colMeans(mu[[year]][1:n,])
+  f.df = data.frame(x=1:365, y=f.avg)
+
+  # Quantiles for ribbon
+  short.quantiles = cbind(rep(0,365),rep(0,365))
+  data.q = short + mu[[year]][1:n,]
+  for (i in 1:365) {
+    short.quantiles[i,] = quantile(data.q[,i],c(0.05,0.95))
+  }
+  day = 1:365
+  # Plot
+  ggplot(data=f.df, aes(x=x, y=y)) + 
+    ggtitle(paste0("Maximum O3 Pollution at Acolman Station In Year ", names_list[[year]]) ) + 
+    xlab("Year") + ylab("O3 ppb") +
+    geom_line() +
+    geom_point(data=data.frame(data_list[[year]]), aes(x=day, y=max), alpha=0.5, size=0.5) + 
+    geom_ribbon(aes(ymin=short.quantiles[,1], ymax=short.quantiles[,2]), alpha=0.5) 
+  
+  ggsave(paste0(year,".png"), width = 40, height = 20, units = "cm")
+}
+
+```
+
+```{r}
+# replace zeros with NAs
+nueve[nueve == 0] = NA
+diez[diez == 0] = NA
+once[once == 0] = NA
+doce[doce == 0] = NA
+trece[trece == 0] = NA
+catorce[catorce == 0] = NA
+quince[quince == 0] = NA
+dieciseis[dieciseis == 0] = NA
+
+# imputation
+moving_average_length = 5
+nueve$max = na_ma(nueve$max, k=moving_average_length)
+diez$max = na_ma(diez$max, k=moving_average_length)
+once$max = na_ma(once$max, k=moving_average_length)
+doce$max = na_ma(doce$max, k=moving_average_length)
+trece$max = na_ma(trece$max, k=moving_average_length)
+catorce$max = na_ma(catorce$max, k=moving_average_length)
+quince$max = na_ma(quince$max, k=moving_average_length)
+dieciseis$max = na_ma(dieciseis$max, k=moving_average_length)
+
+# creating a matrix with the max for each of the years we are interested in
+max.matrix = cbind(nueve[,2], diez[,2], once[,2], doce[,2], trece[,2], catorce[,2], quince[,2], dieciseis[,2])
+
+max.matrix = as.data.frame(max.matrix)
+names(max.matrix) = c("nueve", "diez", "once", "doce", "trece", "catorce", "quince", "dieciseis")
+```
+
+```{r}
+# Make plots of f(x) for each year WITH IMPUTED VALUES
+data_list = list(nueve = nueve, diez = diez, once = once, doce = doce, trece = trece, catorce = catorce, quince = quince, dieciseis = dieciseis)
+names_list = list(nueve = 2009, diez = 2010, once = 2011, doce = 2012, trece = 2013, catorce = 2014, quince = 2015, dieciseis = 2016)
+
+for(year in colnames(max.matrix)){
+  n = 10000
+  short = f[1:n,]
+  f.avg = colMeans(short) + colMeans(mu[[year]][1:n,])
+  f.df = data.frame(x=1:365, y=f.avg)
+
+  # Quantiles for ribbon
+  short.quantiles = cbind(rep(0,365),rep(0,365))
+  data.q = short + mu[[year]][1:n,]
+  for (i in 1:365) {
+    short.quantiles[i,] = quantile(data.q[,i],c(0.05,0.95))
+  }
+  day = 1:365
+  # Plot
+  ggplot(data=f.df, aes(x=x, y=y)) + 
+    ggtitle(paste0("Maximum O3 Pollution at Acolman Station In Year ", names_list[[year]]) ) + 
+    xlab("Year") + ylab("O3 ppb") +
+    geom_line() +
+    geom_point(data=data.frame(data_list[[year]]), aes(x=day, y=max), alpha=0.5, size=0.5) + 
+    geom_ribbon(aes(ymin=short.quantiles[,1], ymax=short.quantiles[,2]), alpha=0.5) 
+  
+  ggsave(paste0(year,"10000iters.png"), width = 40, height = 20, units = "cm")
+}
+
+```
+
+```{r}
+# Now let's analyze mu for each year
+
+# Average offset for each year (nueve through dieciseis)
+nueve_offset = mean(colMeans(mu[["nueve"]])) # -9.816055
+diez_offset = mean(colMeans(mu[["diez"]])) # 6.070717
+once_offset = mean(colMeans(mu[["once"]])) # 9.923544
+doce_offset = mean(colMeans(mu[["doce"]])) # 7.239602
+trece_offset = mean(colMeans(mu[["trece"]])) # 12.61491
+catorce_offset = mean(colMeans(mu[["catorce"]])) # 4.199782
+quince_offset = mean(colMeans(mu[["quince"]])) # -8.430037
+dieciseis_offset = mean(colMeans(mu[["dieciseis"]])) # -4.65355
+
+# Make a histogram of mu_i samples for each year
+for (year in colnames(max.matrix)) {
+  means = colMeans(mu[[year]])
+  p = ggplot(data=data.frame(x=means)) + geom_histogram(aes(x=x))
+  ggsave(paste("./../Desktop/Sp22/modeling/SDS383c/project/", year, "mu.png", sep=""),
+       plot=p)
+}
+
+save.image(file="currentenv.RData")
+```
+
+plot with scatter points
+```{r}
+data_list = list(nueve = nueve, diez = diez, once = once, doce = doce, trece = trece, catorce = catorce, quince = quince, dieciseis = dieciseis)
+names_list = list(nueve = 2009, diez = 2010, once = 2011, doce = 2012, trece = 2013, catorce = 2014, quince = 2015, dieciseis = 2016)
+for(year in colnames(max.matrix)){
+  n = 1000
+  short = f[1:n,]
+  f.avg = colMeans(short) + colMeans(mu[[year]][1:n,])
+  f.df = data.frame(x=1:365, y=f.avg)
+
+  # Quantiles for ribbon
+  short.quantiles = cbind(rep(0,365),rep(0,365))
+  data.q = short + mu[[year]][1:n,]
+  for (i in 1:365) {
+    short.quantiles[i,] = quantile(data.q[,i],c(0.05,0.95))
+  }
+  day = 1:365
+  # Plot
+  ggplot(data=f.df, aes(x=x, y=y)) + 
+    ggtitle(paste0("Maximum O3 Pollution at Acolman Station In Year ", names_list[[year]]) ) + 
+    xlab("Year") + ylab("O3 ppb") +
+    geom_line() +
+    geom_point(data=data.frame(data_list[[year]]), aes(x=day, y=max), alpha=0.5, size=0.5) + 
+    geom_ribbon(aes(ymin=short.quantiles[,1], ymax=short.quantiles[,2]), alpha=0.5) 
+  
+  ggsave(paste0(year,"_with_scatter.png"), width = 40, height = 20, units = "cm")
+}
+```
+
+plot w/o scatter points
+
+```{r}
+data_list = list(nueve = nueve, diez = diez, once = once, doce = doce, trece = trece, catorce = catorce, quince = quince, dieciseis = dieciseis)
+names_list = list(nueve = 2009, diez = 2010, once = 2011, doce = 2012, trece = 2013, catorce = 2014, quince = 2015, dieciseis = 2016)
+for(year in colnames(max.matrix)){
+  n = 1000
+  short = f[1:n,]
+  f.avg = colMeans(short) + colMeans(mu[[year]][1:n,])
+  f.df = data.frame(x=1:365, y=f.avg)
+
+  # Quantiles for ribbon
+  short.quantiles = cbind(rep(0,365),rep(0,365))
+  data.q = short + mu[[year]][1:n,]
+  for (i in 1:365) {
+    short.quantiles[i,] = quantile(data.q[,i],c(0.05,0.95))
+  }
+  day = 1:365
+  # Plot
+  ggplot(data=f.df, aes(x=x, y=y)) + 
+    ggtitle(paste0("Maximum O3 Pollution at Acolman Station In Year ", names_list[[year]]) ) + 
+    xlab("Year") + ylab("O3 ppb") +
+    geom_line()  + 
+    geom_ribbon(aes(ymin=short.quantiles[,1], ymax=short.quantiles[,2]), alpha=0.5) 
+  
+  ggsave(paste0(year,"_without_scatter.png"), width = 40, height = 20, units = "cm")
+}
+```
+
+
+
+
+-----------------------Emily Round 2-------------------------------
+```{r}
+rm(list=ls())
+library(aire.zmvm)
+library(tidyverse)
+require(dplyr)
+require(ggplot2)
+require(ggseas)
+require(ggthemes)
+require(reshape2)
+require(matrixcalc)
+require(mvtnorm)
+require(MASS)
+require(imputeTS)
+
+data <- get_station_data(criterion = "MAXIMOS", 
+                       pollutant = "O3",
+                       year = 2005:2019)
+
+
+# First let's focus on one station and fit a Gaussian process here
+station = "TAH"  # Tlahuac station
+
+aco <- filter(data, station_code==station)
+
+o3_max <- aco %>%
+  group_by(date) %>%
+  summarise(max = ifelse(all(is.na(value)),
+                         NA,
+                         base::max(value, na.rm = TRUE)))
+o3_max$anyo <- sapply(o3_max$date, function(x) substring(x,1,4))
+nueve <- o3_max[which(o3_max$anyo == '2009'),]
+diez <- o3_max[which(o3_max$anyo == '2010'),]
+once <- o3_max[which(o3_max$anyo == '2011'),]
+doce <- o3_max[which(o3_max$anyo == '2012'),]
+# remove feb 29
+doce = doce[-60,]
+trece <- o3_max[which(o3_max$anyo == '2013'),]
+catorce <- o3_max[which(o3_max$anyo == '2014'),]
+quince <- o3_max[which(o3_max$anyo == '2015'),]
+dieciseis <- o3_max[which(o3_max$anyo == '2016'),]
+dieciseis = dieciseis[-60,]
+View(aco)
+View(nueve)
+View(dieciseis)
+```
+
+
+```{r}
+#ggplot() + geom_point(aes(x=1:365,y=max), data=diez,size=0.03)
+
+# Now find posterior estimate of f(x)
+#diez$day = 1:365
+
+#diez = drop_na(diez)
+
+# add column for day of year
+nueve$day = 1:365
+diez$day = 1:365
+once$day = 1:365
+doce$day = 1:365
+trece$day = 1:365
+catorce$day = 1:365
+quince$day = 1:365
+dieciseis$day = 1:365
+
+# replace NA with zeros
+nueve = nueve %>% replace(is.na(.), 0)
+diez = diez %>% replace(is.na(.), 0)
+once = once %>% replace(is.na(.), 0)
+doce = doce %>% replace(is.na(.), 0)
+trece = trece %>% replace(is.na(.), 0)
+catorce = catorce %>% replace(is.na(.), 0)
+quince = quince %>% replace(is.na(.), 0)
+dieciseis = dieciseis %>% replace(is.na(.), 0)
+
+
+
+# update later to better covariance function
+matern_covariance <- function(x, b=1, tau1.sq=1, tau2.sq=1) {
+  eucDist = as.matrix(dist(x, diag=T, upper=T))
+  kron.delta = diag(nrow=length(x))
+  tau1.sq*exp(-0.5*(eucDist/b)^2) + tau2.sq*kron.delta
+}
+```
+
+
+```{r}
+cov.func = matern_covariance(diez$day)
+
+sig.sq = 2
+
+n = dim(diez)[1]
+
+sigma = solve(1/sig.sq*diag(n)+solve(cov.func))
+
+mu = sigma %*%(1/sig.sq*diez$max)
+
+lower = mu - 1.96*sqrt(diag(sigma))
+upper = mu + 1.96*sqrt(diag(sigma))
+
+post.df = data.frame(x=diez$day, y=diez$max, mean=mu, lower=lower, upper=upper)
+
+ggplot(data=post.df, aes(x=x, y=y)) + 
+  geom_point() + 
+  geom_ribbon(aes(ymin=lower, ymax=upper), alpha=0.5) +
+  geom_line(mapping = aes(y=mu))
+```
+
+```{r}
+# incorporate new kernel
+
+# helper
+local_periodic <- function(xi, xj, sigma2=1, p=1, l2=4, c=1.5, a=1){
+    sigma2 * exp(-2*sin(pi*abs(xi-xj)/p)^2/l2 ) * exp(-(xi-xj)^2/(2*l2)) * a*(xi-c)*(xj-c)
+}
+
+# get the whole matrix
+periodic_covariance <- function(x, p=1, l2=4, c=1.5, sigma2=1, a=1) {
+  temp = as.matrix(outer(x, x, function(xi, xj) local_periodic(xi, xj, sigma2, p, l2, c, a)))
+  temp
+}
+
+test = periodic_covariance(diez$day)
+```
+
+```{r}
+
+
+# creating a matrix with the max for each of the years we are interested in
+max.matrix = cbind(nueve[,2], diez[,2], once[,2], doce[,2], trece[,2], catorce[,2], quince[,2], dieciseis[,2])
+
+max.matrix = as.data.frame(max.matrix)
+names(max.matrix) = c("nueve", "diez", "once", "doce", "trece", "catorce", "quince", "dieciseis")
+```
+
+```{r}
+# Parameters: 
+  # - Y is 365 by n_year matrix with pollution levels
+  # - mu is 365 by n_year matrix with offset 
+# Returns: 
+  # - One sample of conditional posterior draw of vector f(x)
+sample.f <- function(Y, mu) {
+  # Normal conjugate 
+  b = rep(0, 365)
+  sigma = matrix(data=0, nrow=365, ncol=365)
+  # for each year, calculate b_i and sigma_i then add them to b, sigma
+  for (i in 1:dim(Y)[2]) {
+    b.i = Y[,i] - mu[, i] / sigma.sq
+    b = b + b.i
+    sigma.i = Cinv + diag(1/sigma.sq, 365)
+    sigma = sigma + sigma.i
+  }
+  post.var = solve(sigma)
+  post.mean = post.var %*% b
+  rmvnorm(1, post.mean, post.var)
+}
+
+# Parameters: 
+  # y: 1x365 vector of values for one single year
+  # f: previous draw of f(x) vector
+# Returns: 
+  # 1x365 vector of offsets for single year
+sample.mu.i <- function(y, f) {
+  b = (y - f) / sigma.sq
+  sigma = Cinv + diag(1/sigma.sq.mu, 365)
+  post.var = solve(sigma)
+  post.mean = post.var %*% matrix(b)
+  rmvnorm(1, post.mean, post.var)
+}
+```
+
+```{r}
+# Some unit testing 
+
+sigma.sq = 1
+Cinv = diag(1, 365)
+sigma.sq.mu = 1
+# Test to see if functions have basic functionality
+test.out = sample.f(max.matrix, matrix(data=0, nrow=365, ncol=8))
+length(test.out) == 365
+
+test2 = sample.mu.i(max.matrix[,1], test.out)
+length(test2) == 365
+
+# both return correct length vectors
+```
+
+```{r}
+# Gibbs sampler
+
+# Fixed parameters
+sigma.sq = 1
+Cinv = solve(periodic_covariance(1:365))
+sigma.sq.mu = 1
+
+
+# Gibbs sampler parameters
+n.iter = 1000
+
+# Gibbs sampler storage parameters
+mu <- list()
+for (year in colnames(max.matrix)) {
+  mu[[year]] = matrix(data=NA, nrow=n.iter, ncol=365)
+  mu[[year]][1,] = rep(0, 365)
+}
+mu.iter = matrix(data=0, nrow=365, ncol=length(colnames(max.matrix)))
+f = matrix(data=NA, nrow=n.iter, ncol=365)
+f[1,] = rep(0, 365)
+ 
+# Start Gibbs sampler
+for (iter in 2:n.iter) {
+  # Sample f
+  f.iter = sample.f(max.matrix, mu.iter)
+  f[iter,] = f.iter
+  
+  # Sample mu_i
+  for (id in 1:length(colnames(max.matrix))) {
+    mu.i = sample.mu.i(max.matrix[,id], f.iter)
+    mu[[colnames(max.matrix)[id]]][iter,] = mu.i
+    mu.iter[,id] = mu.i
+  }
+  #print(iter)
+}
+```
+
+
+```{r}
+f.avg = colMeans(f)
+f.df = data.frame(x=1:365, y=f.avg)
+ggplot(data=f.df, aes(x=x, y=y)) +
+  geom_line() +
+  geom_point(data=data.frame(quince), aes(x=day, y=max), alpha=0.5, size=0.5)
+```
+
+
+
+
+```{r}
+# Make plots of f(x) for each year 
+data_list = list(nueve = nueve, diez = diez, once = once, doce = doce, trece = trece, catorce = catorce, quince = quince, dieciseis = dieciseis)
+names_list = list(nueve = 2009, diez = 2010, once = 2011, doce = 2012, trece = 2013, catorce = 2014, quince = 2015, dieciseis = 2016)
+for(year in colnames(max.matrix)){
+  short = f[1:n.iter,]
+  f.avg = colMeans(short) + colMeans(mu[[year]][1:n.iter,])
+  f.df = data.frame(x=1:365, y=f.avg)
+
+  # Quantiles for ribbon
+  short.quantiles = cbind(rep(0,365),rep(0,365))
+  data.q = short + mu[[year]][1:n.iter,]
+  for (i in 1:365) {
+    short.quantiles[i,] = quantile(data.q[,i],c(0.05,0.95))
+  }
+  day = 1:365
+  # Plot
+  ggplot(data=f.df, aes(x=x, y=y)) + 
+    ggtitle(paste0("Maximum O3 Pollution at Tlahuac Station In Year ", names_list[[year]]) ) + 
+    xlab("Year") + ylab("O3 ppb") +
+    geom_line() +
+    geom_point(data=data.frame(data_list[[year]]), aes(x=day, y=max), alpha=0.5, size=0.5) + 
+    geom_ribbon(aes(ymin=short.quantiles[,1], ymax=short.quantiles[,2]), alpha=0.5) 
+  
+  ggsave(paste0(year,"TAH.png"), width = 40, height = 20, units = "cm")
+}
+
+```
+
+------------------------------------------
+
+
+```{r}
+# replace zeros with NAs
+nueve[nueve == 0] = NA
+diez[diez == 0] = NA
+once[once == 0] = NA
+doce[doce == 0] = NA
+trece[trece == 0] = NA
+catorce[catorce == 0] = NA
+quince[quince == 0] = NA
+dieciseis[dieciseis == 0] = NA
+
+# imputation
+moving_average_length = 5
+nueve$max = na_ma(nueve$max, k=moving_average_length)
+diez$max = na_ma(diez$max, k=moving_average_length)
+once$max = na_ma(once$max, k=moving_average_length)
+doce$max = na_ma(doce$max, k=moving_average_length)
+trece$max = na_ma(trece$max, k=moving_average_length)
+catorce$max = na_ma(catorce$max, k=moving_average_length)
+quince$max = na_ma(quince$max, k=moving_average_length)
+dieciseis$max = na_ma(dieciseis$max, k=moving_average_length)
+
+# creating a matrix with the max for each of the years we are interested in
+max.matrix = cbind(nueve[,2], diez[,2], once[,2], doce[,2], trece[,2], catorce[,2], quince[,2], dieciseis[,2])
+
+max.matrix = as.data.frame(max.matrix)
+names(max.matrix) = c("nueve", "diez", "once", "doce", "trece", "catorce", "quince", "dieciseis")
+```
+
+
+```{r}
+# Make plots of f(x) for each year WITH IMPUTED VALUES
+data_list = list(nueve = nueve, diez = diez, once = once, doce = doce, trece = trece, catorce = catorce, quince = quince, dieciseis = dieciseis)
+names_list = list(nueve = 2009, diez = 2010, once = 2011, doce = 2012, trece = 2013, catorce = 2014, quince = 2015, dieciseis = 2016)
+
+for(year in colnames(max.matrix)){
+  n = n.iter
+  short = f[1:n,]
+  f.avg = colMeans(short) + colMeans(mu[[year]][1:n,])
+  f.df = data.frame(x=1:365, y=f.avg)
+
+  # Quantiles for ribbon
+  short.quantiles = cbind(rep(0,365),rep(0,365))
+  data.q = short + mu[[year]][1:n,]
+  for (i in 1:365) {
+    short.quantiles[i,] = quantile(data.q[,i],c(0.05,0.95))
+  }
+  day = 1:365
+  # Plot
+  ggplot(data=f.df, aes(x=x, y=y)) + 
+    ggtitle(paste0("Maximum O3 Pollution at Tlahuac Station In Year ", names_list[[year]]) ) + 
+    xlab("Year") + ylab("O3 ppb") +
+    geom_line() +
+    geom_point(data=data.frame(data_list[[year]]), aes(x=day, y=max), alpha=0.5, size=0.5) + 
+    geom_ribbon(aes(ymin=short.quantiles[,1], ymax=short.quantiles[,2]), alpha=0.5) 
+  
+  ggsave(paste0(year,"TAH_no_Zeros.png"), width = 40, height = 20, units = "cm")
+}
+
+```
+
+
+
+
+```{r}
+# Now let's analyze mu for each year
+
+# Average offset for each year (nueve through dieciseis)
+nueve_offset = mean(colMeans(mu[["nueve"]])) # -9.816055
+diez_offset = mean(colMeans(mu[["diez"]])) # 6.070717
+once_offset = mean(colMeans(mu[["once"]])) # 9.923544
+doce_offset = mean(colMeans(mu[["doce"]])) # 7.239602
+trece_offset = mean(colMeans(mu[["trece"]])) # 12.61491
+catorce_offset = mean(colMeans(mu[["catorce"]])) # 4.199782
+quince_offset = mean(colMeans(mu[["quince"]])) # -8.430037
+dieciseis_offset = mean(colMeans(mu[["dieciseis"]])) # -4.65355
+
+# Make a histogram of mu_i samples for each year
+for (year in colnames(max.matrix)) {
+  means = colMeans(mu[[year]])
+  p = ggplot(data=data.frame(x=means)) + geom_histogram(aes(x=x))
+  ggsave(paste("./../Desktop/Sp22/modeling/SDS383c/project/", year, "mu.png", sep=""),
+       plot=p)
+}
+
+save.image(file="currentenv.RData")
+```
+
+
+
+plot with scatter points
+```{r}
+data_list = list(nueve = nueve, diez = diez, once = once, doce = doce, trece = trece, catorce = catorce, quince = quince, dieciseis = dieciseis)
+names_list = list(nueve = 2009, diez = 2010, once = 2011, doce = 2012, trece = 2013, catorce = 2014, quince = 2015, dieciseis = 2016)
+for(year in colnames(max.matrix)){
+  n = 1000
+  short = f[1:n,]
+  f.avg = colMeans(short) + colMeans(mu[[year]][1:n,])
+  f.df = data.frame(x=1:365, y=f.avg)
+
+  # Quantiles for ribbon
+  short.quantiles = cbind(rep(0,365),rep(0,365))
+  data.q = short + mu[[year]][1:n,]
+  for (i in 1:365) {
+    short.quantiles[i,] = quantile(data.q[,i],c(0.05,0.95))
+  }
+  day = 1:365
+  # Plot
+  ggplot(data=f.df, aes(x=x, y=y)) + 
+    ggtitle(paste0("Maximum O3 Pollution at Acolman Station In Year ", names_list[[year]]) ) + 
+    xlab("Year") + ylab("O3 ppb") +
+    geom_line() +
+    geom_point(data=data.frame(data_list[[year]]), aes(x=day, y=max), alpha=0.5, size=0.5) + 
+    geom_ribbon(aes(ymin=short.quantiles[,1], ymax=short.quantiles[,2]), alpha=0.5) 
+  
+  ggsave(paste0(year,"_with_scatter.png"), width = 40, height = 20, units = "cm")
+}
+```
+
+plot w/o scatter points
+
+```{r}
+data_list = list(nueve = nueve, diez = diez, once = once, doce = doce, trece = trece, catorce = catorce, quince = quince, dieciseis = dieciseis)
+names_list = list(nueve = 2009, diez = 2010, once = 2011, doce = 2012, trece = 2013, catorce = 2014, quince = 2015, dieciseis = 2016)
+for(year in colnames(max.matrix)){
+  n = 1000
+  short = f[1:n,]
+  f.avg = colMeans(short) + colMeans(mu[[year]][1:n,])
+  f.df = data.frame(x=1:365, y=f.avg)
+
+  # Quantiles for ribbon
+  short.quantiles = cbind(rep(0,365),rep(0,365))
+  data.q = short + mu[[year]][1:n,]
+  for (i in 1:365) {
+    short.quantiles[i,] = quantile(data.q[,i],c(0.05,0.95))
+  }
+  day = 1:365
+  # Plot
+  ggplot(data=f.df, aes(x=x, y=y)) + 
+    ggtitle(paste0("Maximum O3 Pollution at Acolman Station In Year ", names_list[[year]]) ) + 
+    xlab("Year") + ylab("O3 ppb") +
+    geom_line()  + 
+    geom_ribbon(aes(ymin=short.quantiles[,1], ymax=short.quantiles[,2]), alpha=0.5) 
+  
+  ggsave(paste0(year,"_without_scatter.png"), width = 40, height = 20, units = "cm")
+}
+```
+
+
+
+
+
+```{r}
+sample.f <- function(Y, mu, s2) {
+  # Normal conjugate 
+  b = rep(0, 365)
+  sigma = matrix(data=0, nrow=365, ncol=365)
+  # for each year, calculate b_i and sigma_i then add them to b, sigma
+  for (i in 1:dim(Y)[2]) {
+    b.i = (Y[,i] - mu[, i]) / s2
+    b = b + b.i
+    sigma.i = Cinv + diag(1/s2, 365)
+    sigma = sigma + sigma.i
+  }
+  post.var = solve(sigma)
+  post.mean = post.var %*% b
+  rmvnorm(1, post.mean, post.var)
+}
+# Parameters: 
+  # y: 1x365 vector of values for one single year
+  # f: previous draw of f(x) vector
+  # s2: sigma^2
+# Returns: 
+  # 1x365 vector of offsets for single year
+sample.mu.i <- function(y, f, s2) {
+  b = (y - f) / s2
+  sigma = Cinv + diag(1/sigma.sq.mu, 365)
+  post.var = solve(sigma)
+  post.mean = post.var %*% matrix(b)
+  rmvnorm(1, post.mean, post.var)
+}
+# Parameters:
+  # Y is 365 by n_year matrix with pollution levels
+  # f - same as above
+  # mu: 365 by n_year matrix with offset 
+# Returns:
+  # inverse gamma draw of s2
+sample.s2 <- function(Y, f, mu) {
+  a = 0.5 * 2416 - 1 # 2416 is total number of observations
+  b = 0
+  for (i in 1:dim(Y)[2]) {
+    v = Y[,i] - f - mu[,i]
+    b =b + 0.5 * t(v) %*% v
+  }
+  1/rgamma(1, a, b)
+}
+```
+
+```{r}
+###########################################################
+##########   Gibbs Sampler with Variance  #################
+###########################################################
+n.iter = 1000
+# Gibbs sampler storage parameters
+mu <- list()
+for (year in colnames(max.matrix)) {
+  mu[[year]] = matrix(data=NA, nrow=n.iter, ncol=365)
+  mu[[year]][1,] = rep(0, 365)
+}
+mu.iter = matrix(data=0, nrow=365, ncol=length(colnames(max.matrix)))
+f = matrix(data=NA, nrow=n.iter, ncol=365)
+f[1,] = rep(0, 365)
+s2 = matrix(data=NA, nrow=n.iter, ncol=1)
+s2[1,1] = s2.iter = 1
+ 
+# Start Gibbs sampler
+for (iter in 2:n.iter) {
+  # Sample f
+  f.iter = sample.f(max.matrix, mu.iter, s2.iter)
+  f[iter,] = f.iter
+  
+  # Sample mu_i
+  for (id in 1:length(colnames(max.matrix))) {
+    mu.i = sample.mu.i(max.matrix[,id], f.iter, s2.iter)
+    mu[[colnames(max.matrix)[id]]][iter,] = mu.i
+    mu.iter[,id] = mu.i
+  }
+  
+  # Sample s2
+  s2.iter = sample.s2(max.matrix, f.iter, mu.iter)
+  s2[iter,1] = s2.iter
+  
+  print(iter)
+}
+
+```
+
+```{r}
+f.avg = colMeans(f) 
+f.df = data.frame(x=1:365, y=f.avg) 
+ggplot(data=f.df, aes(x=x, y=y)) +
+  geom_line() 
+```
+
+```{r}
+# Make plots of f(x) for each year 
+#n=400
+#n.iter=400
+for (year in colnames(max.matrix)) {
+  f.avg = colMeans(f) + colMeans(mu[[year]][1:n,])
+  f.df = data.frame(x=1:365, y=f.avg)
+  # Quantiles for ribbon
+  short.quantiles = cbind(rep(0,365),rep(0,365))
+  data.q = short.quantiles + mu[[year]][1:n,]
+  for (i in 1:365) {
+    short.quantiles[i,] = quantile(data.q[,i],c(0.05,0.95))
+  }
+  day = 1:365
+  # Plot
+  p=ggplot(data=f.df, aes(x=x, y=y)) + 
+    ggtitle(paste0("Gibbs 2: Maximum O3 @ ACO in ", names_list[[year]]) ) + 
+    xlab("Year") + ylab("O3 ppb") +
+    geom_line() +
+    geom_point(data=data.frame(data_list[[year]]), aes(x=day, y=max), alpha=0.5, size=0.5) + 
+    geom_ribbon(aes(ymin=short.quantiles[,1], ymax=short.quantiles[,2]), alpha=0.5) 
+  
+ggsave(paste0(year,"TAH_Var.png"), width = 40, height = 20, units = "cm")
+}
+```
+
+
+
+```{r}
+# Make plots of f(x) for each year WITH VARIANCE
+data_list = list(nueve = nueve, diez = diez, once = once, doce = doce, trece = trece, catorce = catorce, quince = quince, dieciseis = dieciseis)
+names_list = list(nueve = 2009, diez = 2010, once = 2011, doce = 2012, trece = 2013, catorce = 2014, quince = 2015, dieciseis = 2016)
+
+for(year in colnames(max.matrix)){
+  n = n.iter
+  short = f[1:n,]
+  f.avg = colMeans(short) + colMeans(mu[[year]][1:n,])
+  f.df = data.frame(x=1:365, y=f.avg)
+
+  # Quantiles for ribbon
+  short.quantiles = cbind(rep(0,365),rep(0,365))
+  data.q = short + mu[[year]][1:n,]
+  for (i in 1:365) {
+    short.quantiles[i,] = quantile(data.q[,i],c(0.05,0.95))
+  }
+  day = 1:365
+  # Plot
+  ggplot(data=f.df, aes(x=x, y=y)) + 
+    ggtitle(paste0("Maximum O3 Pollution at Tlahuac Station In Year ", names_list[[year]]) ) + 
+    xlab("Year") + ylab("O3 ppb") +
+    geom_line() +
+    geom_point(data=data.frame(data_list[[year]]), aes(x=day, y=max), alpha=0.5, size=0.5) + 
+    geom_ribbon(aes(ymin=short.quantiles[,1], ymax=short.quantiles[,2]), alpha=0.5) 
+  
+  ggsave(paste0(year,"TAH_Var.png"), width = 40, height = 20, units = "cm")
+}
+
+```
+
+
+
+```{r}
+f.avg = colMeans(f) 
+
+f.df = data.frame(x=1:365, y=f.avg) 
+
+# Quantiles for ribbon
+short.quantiles = cbind(rep(0,365),rep(0,365))
+for (i in 1:365) {
+  short.quantiles[i,] = quantile(f[,i],c(0.05,0.95))
+}
+  
+ggplot(data=f.df, aes(x=x, y=y)) +
+  geom_line() +
+  geom_hline(yintercept=100, color="red") +
+  geom_point(data=data.frame(data_list[["nueve"]]), aes(x=day, y=max), alpha=0.5, size=0.5) +
+  geom_point(data=data.frame(data_list[["diez"]]), aes(x=day, y=max), alpha=0.5, size=0.5) +
+  geom_point(data=data.frame(data_list[["once"]]), aes(x=day, y=max), alpha=0.5, size=0.5) +
+  geom_point(data=data.frame(data_list[["doce"]]), aes(x=day, y=max), alpha=0.5, size=0.5) +
+  geom_point(data=data.frame(data_list[["trece"]]), aes(x=day, y=max), alpha=0.5, size=0.5) +
+  geom_point(data=data.frame(data_list[["catorce"]]), aes(x=day, y=max), alpha=0.5, size=0.5) +
+  geom_point(data=data.frame(data_list[["quince"]]), aes(x=day, y=max), alpha=0.5, size=0.5) +
+  geom_point(data=data.frame(data_list[["dieciseis"]]), aes(x=day, y=max), alpha=0.5, size=0.5) +
+  geom_ribbon(aes(ymin=short.quantiles[,1], ymax=short.quantiles[,2]), alpha=0.5)
+```
+
+```{r}
+# Now let's analyze mu for each year
+
+# Average offset for each year (nueve through dieciseis)
+nueve_offset = mean(colMeans(mu[["nueve"]])) # -1.345085
+diez_offset = mean(colMeans(mu[["diez"]])) # 0.4717969
+once_offset = mean(colMeans(mu[["once"]])) # 0.9155524
+doce_offset = mean(colMeans(mu[["doce"]])) #  0.608444
+trece_offset = mean(colMeans(mu[["trece"]])) # 1.227078
+catorce_offset = mean(colMeans(mu[["catorce"]])) # 0.2612708
+quince_offset = mean(colMeans(mu[["quince"]])) # -1.188582
+dieciseis_offset = mean(colMeans(mu[["dieciseis"]])) # -0.7562392
+
+i=2008
+# Make a histogram of mu_i samples for each year
+for (year in colnames(max.matrix)) {
+  i=i+1
+  means = colMeans(mu[[year]])
+  p[[year]] = ggplot(data=data.frame(x=means)) + geom_histogram(aes(x=x))+ggtitle(i)
+ggsave(paste0(year,"TAH_mu.png"), width = 20, height = 20, units = "cm",plot=p[[year]])
+}
+ggarrange(p[["nueve"]],p[["diez"]], p[["once"]],p[["doce"]], p[["trece"]], p[["catorce"]], p[["quince"]], p[["dieciseis"]], ncol=4, nrow=2)
+```
+
+```{r}
+
+table=c(nueve_offset, diez_offset, once_offset, doce_offset, trece_offset, catorce_offset, quince_offset, dieciseis_offset)
+table
+
+```
+
+
+```{r}
+# and s2
+plot(as.vector(s2), type="l")
+mean(as.vector(s2)) # 8.792873
+ggplot(data=data.frame(x=as.vector(s2)[-1])) + geom_histogram(aes(x=x, y=..density..))
+```
